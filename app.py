@@ -130,9 +130,10 @@ def start_worker():
     worker_thread = threading.Thread(target=sqs_worker_loop, daemon=True)
     worker_thread.start()
 
-# Inicia o worker SQS em uma thread de background
-# Isso garante que ele inicie tanto com 'flask run' quanto com 'gunicorn'
-start_worker()
+# Inicia o worker SQS em uma thread de background.
+# Testes unitarios desabilitam o worker para evitar loop infinito no import.
+if os.getenv("DISABLE_WORKER", "false").lower() != "true":
+    start_worker()
 
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 8005))
