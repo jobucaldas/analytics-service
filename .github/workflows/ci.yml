@@ -65,7 +65,7 @@ jobs:
       - name: Login to ECR
         if: github.event_name == 'push'
         id: ecr
-        uses: aws-actions/amazon-ecr-login@v3
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Docker build
         run: docker build -t ${{ env.SERVICE_NAME }}:${{ github.sha }} .
