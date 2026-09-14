@@ -17,8 +17,8 @@ env:
   GITOPS_BRANCH: t3
 
 jobs:
-  ci:
-    name: Test, scan and publish
+  test:
+    name: Test and lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -39,6 +39,23 @@ jobs:
       - name: Lint
         run: flake8 .
 
+  scan:
+    name: Security scan
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
       - name: SCA dependency scan
         continue-on-error: true
         run: pip-audit -r requirements.txt
@@ -53,6 +70,13 @@ jobs:
           severity: CRITICAL
           exit-code: "1"
           ignore-unfixed: false
+
+  publish:
+    name: Build and publish
+    needs: scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
 
       - name: Configure AWS credentials
         if: github.event_name == 'push'
@@ -116,4 +140,18 @@ jobs:
           git add k8s/app/${{ env.SERVICE_NAME }}/deployment.yaml
           git diff --cached --quiet && exit 0
           git commit -m "chore(gitops): update ${{ env.SERVICE_NAME }} image to ${{ github.sha }}"
-          for i in 1 2 3 4 5; do git pull --rebase origin ${{ env.GITOPS_BRANCH }} && git push origin HEAD:${{ env.GITOPS_BRANCH }} && break || sleep 10; done
+          success=false
+          for _ in 1 2 3 4 5; do
+            git rebase --abort || true
+            if git pull --rebase origin ${{ env.GITOPS_BRANCH }}; then
+              if git push origin HEAD:${{ env.GITOPS_BRANCH }}; then
+                success=true
+                break
+              fi
+            fi
+            sleep 10
+          done
+          if [ "$success" != "true" ]; then
+            echo "GitOps push failed after retries"
+            exit 1
+          fi
