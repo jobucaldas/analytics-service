@@ -83,8 +83,12 @@ jobs:
         env:
           IMAGE_URI: ${{ steps.ecr.outputs.registry }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
         run: |
-          docker tag ${{ env.SERVICE_NAME }}:${{ github.sha }} "$IMAGE_URI"
-          docker push "$IMAGE_URI"
+          if aws ecr describe-images --repository-name ${{ env.SERVICE_NAME }} --image-ids imageTag=${{ github.sha }} >/dev/null 2>&1; then
+            echo "tag exists, skip push"
+          else
+            docker tag ${{ env.SERVICE_NAME }}:${{ github.sha }} "$IMAGE_URI"
+            docker push "$IMAGE_URI"
+          fi
           echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
 
       - name: Update GitOps image tag
