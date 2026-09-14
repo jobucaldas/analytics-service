@@ -115,7 +115,7 @@ jobs:
           fi
           echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
 
-      - name: Update GitOps image tag
+      - name: Checkout GitOps repository
         if: github.event_name == 'push'
         uses: actions/checkout@v7
         with:
@@ -130,28 +130,33 @@ jobs:
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
-      - name: Commit GitOps image tag
+      - name: Create GitOps pull request
         if: github.event_name == 'push'
         working-directory: gitops
+        env:
+          GH_TOKEN: ${{ secrets.GITOPS_TOKEN }}
         run: |
-          yq -i '(.spec.template.spec.containers[] | select(.name == env(SERVICE_NAME)) | .image) = env(IMAGE_URI)' k8s/app/${{ env.SERVICE_NAME }}/deployment.yaml
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          BRANCH="gitops/${SERVICE_NAME}-${SHORT_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          yq -i '(.spec.template.spec.containers[] | select(.name == env(SERVICE_NAME)) | .image) = env(IMAGE_URI)' \
+            "k8s/app/${SERVICE_NAME}/deployment.yaml"
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add k8s/app/${{ env.SERVICE_NAME }}/deployment.yaml
-          git diff --cached --quiet && exit 0
-          git commit -m "chore(gitops): update ${{ env.SERVICE_NAME }} image to ${{ github.sha }}"
-          success=false
-          for _ in 1 2 3 4 5; do
-            git rebase --abort || true
-            if git pull --rebase origin ${{ env.GITOPS_BRANCH }}; then
-              if git push origin HEAD:${{ env.GITOPS_BRANCH }}; then
-                success=true
-                break
-              fi
-            fi
-            sleep 10
-          done
-          if [ "$success" != "true" ]; then
-            echo "GitOps push failed after retries"
-            exit 1
+          git switch -c "$BRANCH"
+          git add "k8s/app/${SERVICE_NAME}/deployment.yaml"
+
+          if git diff --cached --quiet; then
+            exit 0
           fi
+
+          git commit -m "chore(gitops): update ${SERVICE_NAME} image"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --repo "$GITOPS_REPO" \
+            --base "$GITOPS_BRANCH" \
+            --head "$BRANCH" \
+            --title "chore(gitops): update ${SERVICE_NAME}" \
+            --body "Atualiza ${SERVICE_NAME} para ${IMAGE_URI}."
