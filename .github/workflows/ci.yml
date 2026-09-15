@@ -34,10 +34,21 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Unit tests
-        run: python -m pytest
+        run: python -m pytest --junitxml=pytest.xml
 
       - name: Lint
-        run: flake8 .
+        run: flake8 . --tee --output-file=flake8.txt
+
+      - name: Upload test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-flake8-${{ github.sha }}
+          path: |
+            pytest.xml
+            flake8.txt
+          retention-days: 7
+          overwrite: true
 
   scan:
     name: Security scan
@@ -58,18 +69,54 @@ jobs:
 
       - name: SCA dependency scan
         continue-on-error: true
-        run: pip-audit -r requirements.txt
+        run: pip-audit -r requirements.txt --format=json > pip-audit.json || true
 
       - name: SAST with bandit
-        run: bandit -r . -x ./tests -lll
+        run: bandit -r . -x ./tests -lll -f json -o bandit.json
 
-      - name: Trivy filesystem scan
+      - name: Upload SCA and SAST reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sca-sast-${{ github.sha }}
+          path: |
+            pip-audit.json
+            bandit.json
+          retention-days: 7
+          overwrite: true
+
+      - name: Trivy filesystem scan (SARIF)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          severity: HIGH,CRITICAL
+          format: sarif
+          output: trivy-fs.sarif
+          exit-code: "0"
+
+      - name: Trivy filesystem scan (gate)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           severity: CRITICAL
           exit-code: "1"
           ignore-unfixed: false
+
+      - name: Upload Trivy filesystem SARIF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-fs-${{ github.sha }}
+          path: trivy-fs.sarif
+          retention-days: 7
+          overwrite: true
+
+      - name: Upload Trivy filesystem SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4.37.9
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
 
   publish:
     name: Build and publish
@@ -94,13 +141,38 @@ jobs:
       - name: Docker build
         run: docker build -t ${{ env.SERVICE_NAME }}:${{ github.sha }} .
 
-      - name: Trivy image scan
+      - name: Trivy image scan (SARIF)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.SERVICE_NAME }}:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          format: sarif
+          output: trivy-image.sarif
+          exit-code: "0"
+
+      - name: Trivy image scan (gate)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.SERVICE_NAME }}:${{ github.sha }}
           severity: CRITICAL
           exit-code: "1"
           ignore-unfixed: false
+
+      - name: Upload Trivy image SARIF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-image-${{ github.sha }}
+          path: trivy-image.sarif
+          retention-days: 7
+          overwrite: true
+
+      - name: Upload Trivy image SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4.37.9
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
 
       - name: Push image to ECR
         if: github.event_name == 'push'
