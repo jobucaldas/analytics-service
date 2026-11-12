@@ -2,9 +2,9 @@ name: analytics-service CI
 
 on:
   pull_request:
-    branches: [main, t3]
+    branches: [main, t3, t4]
   push:
-    branches: [main, t3]
+    branches: [t3, t4]
 
 permissions:
   contents: read
@@ -14,7 +14,7 @@ env:
   SERVICE_NAME: analytics-service
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
   GITOPS_REPO: jobucaldas/3DCLT-TC
-  GITOPS_BRANCH: t3
+  GITOPS_BRANCH: ${{ github.ref_name }}
 
 jobs:
   test:
