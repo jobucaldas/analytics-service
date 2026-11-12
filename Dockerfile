@@ -17,6 +17,6 @@ USER analytics-service
 COPY --from=builder /venv /venv
 ENV PATH="/venv/bin:$PATH"
 
-COPY --chown=analytics-service app.py .
+COPY --chown=analytics-service app.py gunicorn.conf.py ./
 CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8005} app:app"]
 
