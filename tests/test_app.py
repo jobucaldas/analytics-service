@@ -50,3 +50,27 @@ def test_process_message_writes_event_and_deletes_message(monkeypatch):
     assert calls["put_item"]["TableName"] == "ToggleMasterAnalytics"
     assert calls["put_item"]["Item"]["user_id"] == {"S": "user-1"}
     assert calls["delete_message"]["ReceiptHandle"] == "receipt-1"
+
+
+def test_handle_message_continues_trace_from_producer(monkeypatch):
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    from opentelemetry.trace import SpanKind
+
+    module = load_app(monkeypatch)
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(module, "tracer", provider.get_tracer("test"))
+    monkeypatch.setattr(module, "process_message", lambda message: None)
+
+    module.handle_message({
+        "MessageAttributes": {
+            "traceparent": {"DataType": "String", "StringValue": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"},
+        },
+    })
+
+    span = exporter.get_finished_spans()[0]
+    assert format(span.context.trace_id, "032x") == "0af7651916cd43dd8448eb211c80319c"
+    assert span.kind == SpanKind.CONSUMER
