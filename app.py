@@ -9,10 +9,14 @@ import boto3
 from botocore.exceptions import NoCredentialsError, ClientError
 from flask import Flask, jsonify
 from dotenv import load_dotenv
+from opentelemetry import trace
+from opentelemetry.propagate import extract
+from opentelemetry.trace import SpanKind
 
 # Configura o logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 # Carrega .env para desenvolvimento local
 load_dotenv()
@@ -86,6 +90,12 @@ def process_message(message):
         # Não deleta a mensagem, tenta novamente
 
 
+def handle_message(message):
+    attributes = {k: v.get('StringValue') for k, v in message.get('MessageAttributes', {}).items()}
+    with tracer.start_as_current_span("process evaluation event", context=extract(attributes), kind=SpanKind.CONSUMER):
+        process_message(message)
+
+
 def sqs_worker_loop():
     """ Loop principal do worker que ouve a fila SQS """
     log.info("Iniciando o worker SQS...")
@@ -95,6 +105,7 @@ def sqs_worker_loop():
             response = sqs_client.receive_message(
                 QueueUrl=SQS_QUEUE_URL,
                 MaxNumberOfMessages=10,  # Processa em lotes de até 10
+                MessageAttributeNames=['All'],
                 WaitTimeSeconds=20
             )
 
@@ -106,7 +117,7 @@ def sqs_worker_loop():
             log.info(f"Recebidas {len(messages)} mensagens.")
 
             for message in messages:
-                process_message(message)
+                handle_message(message)
 
         except ClientError as e:
             log.error(f"Erro do Boto3 no loop principal do SQS: {e}")
